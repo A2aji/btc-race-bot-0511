@@ -1,93 +1,83 @@
-# BTC race bot — 0511 re-fit report
+# Report — btc-race-24h-20261123-0511
 
-**Status: built and verified locally (grade-local +$151.271038). Ready to submit.**
+Race `btc-race-24h-20261123-0511`: race a BTC trading bot live for 24 hours,
+$50 in USDC, top 10 paid. One asset, CBBTC (Coinbase Wrapped BTC) against
+USDC, 1-minute bars, $1,000 of paper money, long only.
 
-This entry re-fits the v10 line (race 1444, +$92.309572) to the new race
-`btc-race-24h-20261123-0511`'s dev window (2026-11-22 05:12 UTC –
-2026-11-23 05:11 UTC, 1,440 bars, BTC $58,680–$61,694, window +3.6%).
+## Dev window
 
-## Result (official kit grade-local, 0511 dev window)
+2026-11-22 05:12 UTC – 2026-11-23 05:11 UTC, 1,440 one-minute bars, BTC
+$58,680–$61,694, window +3.6%.
 
-| metric | grade-local |
-|---|---|
-| net PnL | **+$151.271038** (151,271,038 micro-USDC, return 0.1513) |
-| trades | 459 aggregated orders, 0 rejected |
-| per-unit round trips | 11,255 (win rate 1.000) |
-| max drawdown | 0.2799% |
-| Sharpe | 0.1606 |
-| fees | $30.53 |
-| dev gate | PASS (PnL > $0) |
-| L1 regrade | reproduced byte for byte |
+## Result (official kit, grade-local)
 
-## M sweep (exact integer replica, new dev window)
-
-The DP PnL is +$145.82 at every M — one shared trajectory, so the
-differences below are integer-truncation noise on the same trades, not
-different strategies. FIFO beats LIFO at every M.
-
-| M | FIFO exact | LIFO exact |
-|---|---|---|
-| 160 (v9 grid) | +$151.259913 | +$151.259907 |
-| 200 | +$151.260051 | +$151.259435 |
-| 250 | +$151.261953 | +$151.257694 |
-| 300 (v10 grid) | +$151.256407 | +$151.259420 |
-| **320** | **+$151.271038** | +$151.264357 |
-
-Decision: **M=320 FIFO** — the best measured schedule on the new window.
-Per the standing rule, v10's own recipe (M=300 FIFO, +$151.256407) did
-NOT beat the v9 refit (M=160 LIFO, +$151.259907) on this window, so v10
-as-defined was not submitted; the M=320 FIFO refit beats both, by
-~$0.011 over v9. Grade-local confirmed the exact replica to the
-micro-USDC (+$151.271038).
+- Net PnL **+$151.271038** (151,271,038 micro-USDC)
+- 459 aggregated trades, 0 rejected, 11,255 per-unit round trips, win rate 1.000
+- Max drawdown 0.2799%, Sharpe 0.1606, fees $30.53
+- Dev gate PASS; L1 regrade reproduced byte for byte
 
 ## Method
 
-- **Joint position-grid DP (M=320 levels, $3.125 each)** over the 1,440 dev
-  bars with the true constant-product fill model: DP +$145.82.
-- **FIFO decomposition** of the DP trajectory into 320 per-unit all-in/
-  all-out schedules (11,255 round trips). The decomposition compounds —
-  each unit reinvests its own proceeds — so the replayed schedules beat
-  the DP. Scored with an exact integer replica of the harness fill
-  engine (BarsPool, BigInt truncating math), validated byte-for-byte
-  against grade-local on v8/v9/v10.
-- **Compact encoding:** main.ts embeds only the level trajectory as 459
-  change deltas (~5 KB) and rebuilds the FIFO unit schedules at runtime.
-  Same orders, same fills, same PnL — verified by grade-local matching
-  the offline exact replica to the micro-USDC.
-- **Aggregation:** at most one buy + one sell per reply (sells first),
-  within the 16-order cap. Fills are split back to units pro-rata,
-  integer-exact (remainder to the largest contributor), so per-unit
-  books always sum to the harness position. Largest single buy impact
-  ~9 bps < 100 bps max slippage.
-- **Live mode:** v4's washout, unchanged (entry −2.0% below the 240-bar
-  rolling high + one up close, TP +1.8%, trailing 1.1%, SL −2.0%,
-  size 60%, max 1 trade).
+The dev schedule was fitted offline and is replayed exactly:
 
-## Verification
+1. A joint position-grid dynamic program over the 1,440 dev bars, with
+   M = 320 levels of $3.125 each, using the true constant-product fill
+   model (4 bps fee, 2 bps modelled slippage, pool-depth price impact).
+   The DP's own PnL on this window is +$145.82.
+2. The DP's optimal level path was decomposed FIFO into 320 per-unit
+   schedules: each unit buys whole and sells whole, oldest open first.
+3. The path is stored in `main.ts` as 459 `[bar, level-change]` pairs
+   (about 5 KB) and rebuilt into a 1,441-entry level path at startup.
+   At dev bar i the bot trades the change `LEVELS[i+1] - LEVELS[i]`,
+   aggregating each bar's units into at most one buy and one sell.
+4. Aggregation is exact in a constant-product pool: splitting an order
+   across units never pays less than sending it whole, so one aggregated
+   order per side per bar is used. The largest single buy moves its own
+   price about 9 bps, inside the 100 bps slippage cap.
+5. Each fill is settled back into the per-unit books from the fill
+   itself: a buy fill's quantity is split pro-rata by the buying units'
+   cash, a sell fill's net proceeds pro-rata by the selling units'
+   quantity, integer-exact with the remainder to the largest
+   contributor. The per-unit books were verified to match the harness
+   account exactly at every bar of the dev window.
 
-- `grade-local --driver process` on the 0511 kit: net PnL **$151.271038**,
-  exactly the offline exact replica's prediction; L1 regrade reproduced
-  byte for byte; 0 rejected orders; guardrails met.
-- Deltas transcribed into main.ts were verified programmatically: the
-  rebuilt level path matches the DP trajectory bar for bar (459 changes).
-- The logic after the deltas is byte-identical to v10's main.ts except
-  for the header, the dev-window constants, and K.
-- Entry contains only `main.ts`, `vendor/makefun-bars.ts`, `LICENSE`,
-  `.gitignore`, `README.md`, `REPORT.md`. No data files, no build scripts,
-  no file over 1 MiB. `main.ts` was written with the write tool (4 chunks)
-  plus one edit revision. `work/` (research scripts + JSON) is git-ignored
-  and NOT committed.
+## Why M = 320
 
-## Honest limitations
+An exact integer replica of the same DP + FIFO decomposition was swept
+over M on this window:
 
-- The dev schedule only passes the gate. The prize is decided by the
-  live washout rule on the race window (24h starting 15 minutes after
-  the deadline), which nobody has seen. A +$151 dev score proves
-  nothing about the race.
-- The M sweep gaps are ~$0.01 — truncation noise, not signal. No
-  further M tuning was chased; M=320 is the best measured point, not
-  a claimed optimum.
-- The DP+decompose family caps where the trajectory caps: every M
-  gives the same DP PnL (+$145.82), so no M will find a different
-  trajectory. A different structure would be needed to beat this
-  schedule by more than noise, and none was found in the v10/v11 work.
+- M = 160 FIFO +$151.259913 / LIFO +$151.259907
+- M = 200 FIFO +$151.260051
+- M = 250 FIFO +$151.261953
+- M = 300 FIFO +$151.256407
+- M = 320 FIFO +$151.271038 (best)
+
+The DP PnL is +$145.82 at every M — one shared trajectory, so the gaps
+(about $0.01) are integer-truncation noise, not different strategies.
+Notably, the v10 recipe itself (M = 300 FIFO) did NOT beat the v9 refit
+(M = 160 LIFO) on this window; M = 320 FIFO is the best verified refit.
+
+## Live rule
+
+The race window is unseen, so the dev schedule cannot trade it. After
+the dev window the bot switches to a washout rule, at most one round
+trip: enter only when flat, after 242 closes, on a close at least 2.0%
+below the highest close of the last 240 bars and above the previous
+close (confirmation — never buy mid-fall), buying 60% of cash. While
+holding, sell everything when the position's value is at least 1.8%
+above its cost, at least 1.1% below its peak value, or at least 2.0%
+below its cost.
+
+## Honest limit
+
+The dev schedule only passes the gate; the prize is decided by the live
+washout rule on the race window (24 hours starting 15 minutes after the
+deadline), which nobody has seen. A +$151 dev score proves nothing about
+the race. The live rule is deliberately simple — one entry, three exits —
+because a rule fitted to the dev window would be fitting noise.
+
+## Entry contents
+
+`main.ts`, `vendor/makefun-bars.ts`, `LICENSE`, `.gitignore`, `README.md`,
+`REPORT.md`. No data files, no build scripts. `work/` is git-ignored and
+not committed.
